@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.Template", "Bot.Template\Bot.Template.csproj", "{91A723BE-C26B-4397-8D40-D979EE8BED41}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MarketMonitor", "MarketMonitor\MarketMonitor.csproj", "{91A723BE-C26B-4397-8D40-D979EE8BED41}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

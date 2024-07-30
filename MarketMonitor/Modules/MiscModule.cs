@@ -1,10 +1,12 @@
 ﻿using System.Reflection;
-using Bot.Template.HostedServices;
 using Discord;
 using Discord.Interactions;
+using MarketMonitor.HostedServices;
 
-namespace Bot.Template.Modules;
+namespace MarketMonitor.Modules;
 
+[CommandContextType([InteractionContextType.Guild, InteractionContextType.BotDm, InteractionContextType.PrivateChannel]),
+ IntegrationType([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])]
 public class MiscModule() : InteractionModuleBase<SocketInteractionContext>
 {
     [SlashCommand("about", "Information about the bot")]
@@ -33,19 +35,4 @@ public class MiscModule() : InteractionModuleBase<SocketInteractionContext>
     public async Task InviteCommand()
         => await RespondAsync(
             $"https://discord.com/api/oauth2/authorize?client_id={Context.Client.CurrentUser.Id}&scope=bot%20applications.commands");
-
-    [SlashCommand("help", "Commands")]
-    public async Task HelpCommand()
-    {
-        var commands = await (DiscordClientHost.IsDebug() ? Context.Guild.GetApplicationCommandsAsync() : Context.Client.GetGlobalApplicationCommandsAsync());
-
-        var embed = new EmbedBuilder()
-            .WithTitle("Commands")
-            .WithColor(Color.Blue)
-            .WithDescription(string.Join("\n", commands.Select(c => $"</{c.Name}:{c.Id}>")))
-            .WithFooter(DiscordClientHost.DisplayName(Context.User), Context.User.GetAvatarUrl())
-            .Build();
-
-        await RespondAsync(embed: embed);
-    }
 }

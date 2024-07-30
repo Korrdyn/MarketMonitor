@@ -1,7 +1,7 @@
 ﻿using Discord.WebSocket;
 using Microsoft.Extensions.Hosting;
 
-namespace Bot.Template.HostedServices;
+namespace MarketMonitor.HostedServices;
 
 internal sealed class ClientStatus(DiscordSocketClient client) : IHostedService, IDisposable
 {
