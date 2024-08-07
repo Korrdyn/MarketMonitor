@@ -122,7 +122,9 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
             .ToListAsync();
 
         var groups = trackedItems.Where(i => i.LastNotify == null || DateTime.UtcNow - i.LastNotify > i.Seller.NotifyFreq)
-            .GroupBy(i => new { i.WorldId, i.DatacenterId });
+            .GroupBy(i => new { i.WorldId, i.DatacenterId }).ToList();
+
+        Log.Information($"[Universalis] Checking {trackedItems.Count:N0} items ({groups.Count:N0} groups)");
 
         foreach (var group in groups)
         {
@@ -165,6 +167,7 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
                         if (nextPrice == null || selfPrice.pricePerUnit <= nextPrice.pricePerUnit) continue;
 
                         var cutAmount = selfPrice.pricePerUnit - nextPrice.pricePerUnit;
+                        // Send user notification of undercut
                         try
                         {
                             var user = await client.GetUserAsync(item.SellerId);
@@ -175,8 +178,8 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
                                 .WithDescription(
                                     $"[Universalis | Updated {new TimestampTag(DateTimeOffset.FromUnixTimeMilliseconds(prices.lastUploadTime), TimestampTagStyles.Relative)}](https://universalis.app/market/{item.ItemId})")
                                 .WithThumbnailUrl($"https://xivapi.com{item.Item.Icon}")
-                                .AddField("Your Price", $"<:gil:1267715732704198797> {selfPrice.pricePerUnit:N0}", true)
-                                .AddField("Lowest Price", $"<:gil:1267715732704198797> {nextPrice.pricePerUnit:N0}", true)
+                                .AddField("Your Price", $"<:gil:1270605677651558433> {selfPrice.pricePerUnit:N0}", true)
+                                .AddField("Lowest Price", $"<:gil:1270605677651558433> {nextPrice.pricePerUnit:N0}", true)
                                 .AddField("Amount Cut",
                                     $"<:gil:1267715732704198797> {cutAmount:N0} ({Math.Round((decimal)(selfPrice.pricePerUnit - nextPrice.pricePerUnit) / selfPrice.pricePerUnit * 100, 1):N1}%)",
                                     true)

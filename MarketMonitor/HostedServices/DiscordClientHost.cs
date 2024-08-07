@@ -232,6 +232,7 @@ internal sealed class DiscordClientHost : IHostedService
 
     public static bool IsDebug()
     {
+        return false;
 #if DEBUG
         return true;
 #else

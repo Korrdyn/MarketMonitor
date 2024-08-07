@@ -2,6 +2,7 @@
 using Discord.Interactions;
 using MarketMonitor.Entities;
 using MarketMonitor.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace MarketMonitor.Modules;
 
@@ -25,5 +26,25 @@ public class RetainerModule(DatabaseContext db, ApiService api) : BaseModule(db)
         await db.SaveChangesAsync();
 
         await FollowupAsync(embed: Embeds.Success("Retainer added"));
+    }
+
+    [SlashCommand("remove", "Remove a retainer from being tracked")]
+    public async Task Remove(string name)
+    {
+        await DeferAsync();
+        var user = await db.GetUser(Context.User.Id);
+        if (!await CheckDC(user)) return;
+
+        var retainer = await db.Retainers.FirstOrDefaultAsync(r => r.OwnerId == user.Id && r.Name == name);
+        if (retainer == null)
+        {
+            await FollowupAsync(embed: Embeds.Error("Unknown retainer"));
+            return;
+        }
+
+        db.Remove(retainer);
+        await db.SaveChangesAsync();
+
+        await FollowupAsync(embed: Embeds.Success("Retainer removed"));
     }
 }

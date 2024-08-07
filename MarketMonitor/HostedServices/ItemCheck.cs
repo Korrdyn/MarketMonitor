@@ -28,7 +28,6 @@ internal sealed class ItemCheck(ApiService api) : IHostedService, IDisposable
 
     private async void SetStatus(object? state)
     {
-        Log.Information("Checking items");
         await api.CheckItems();
     }
 }

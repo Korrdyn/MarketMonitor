@@ -1,4 +1,5 @@
-﻿using Discord;
+﻿using System.Text;
+using Discord;
 using Discord.Interactions;
 using MarketMonitor.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -78,6 +79,73 @@ public class ItemModule(DatabaseContext db) : BaseModule(db)
         await FollowupAsync(embed: Embeds.Success($"Stopped tracking **{item.Item.Name}**{(item.World != null ? $" on **{item.World.Name}**" : "")}"));
     }
 
+    [SlashCommand("list", "List tracked items")]
+    public async Task List()
+    {
+        await DeferAsync();
+        var user = await db.GetUser(Context.User.Id);
+        if (!await CheckDC(user)) return;
+        var (hasRetainers, retainers) = await CheckRetainer(user);
+        if (!hasRetainers) return;
+
+        var items = await db.TrackedItems.Include(i => i.Item).Include(i => i.World).Include(i => i.Datacenter).Where(i => i.SellerId == user.Id).OrderBy(i => i.WorldId)
+            .ThenBy(i => i.DatacenterId).ThenBy(i => i.ItemId).Take(25)
+            .ToListAsync();
+        if (items.Count == 0)
+        {
+            await FollowupAsync(embed: Embeds.Error($"No items tracked.\nTrack an item with {await GetCommand("items", ["track"])}"));
+            return;
+        }
+
+        var count = await db.TrackedItems.CountAsync(i => i.SellerId == user.Id);
+        var (embed, components) = BuildItemList(user.Id, items, 0, Math.Ceiling((decimal)count / 25));
+
+        await FollowupAsync(embed: embed, components: components);
+    }
+
+    // 0 based page
+    public (Embed, MessageComponent) BuildItemList(ulong id, List<TrackedItemEntity> items, int page, decimal totalPages)
+    {
+        var embed = new EmbedBuilder()
+            .WithTitle("Tracked Items")
+            .WithDescription(string.Join("\n", items.Select(i => $"[{(i.World != null ? i.World.Name : i.Datacenter!.Name)}] {i.Item.Name}")))
+            .WithColor(Color.Magenta)
+            .WithFooter($"Page {page + 1:N0} of {totalPages:N0}").Build();
+        var components = new ComponentBuilder()
+            .AddRow(new ActionRowBuilder()
+                .WithButton("Previous page", $"item_list_{id}_{page - 1}", disabled: page == 0)
+                .WithButton("Next page", $"item_list_{id}_{page + 1}", disabled: page + 1 == totalPages))
+            .Build();
+
+        return (embed, components);
+    }
+
+    [ComponentInteraction("item_list_*_*", true)]
+    public async Task ItemListButtons(ulong id, int page)
+    {
+        if (Context.User.Id != id) return;
+        await DeferAsync();
+
+        var items = await db.TrackedItems.Include(i => i.Item).Include(i => i.World).Include(i => i.Datacenter).Where(i => i.SellerId == Context.User.Id).OrderBy(i => i.WorldId)
+            .ThenBy(i => i.DatacenterId).ThenBy(i => i.ItemId)
+            .Skip(page * 25).Take(25)
+            .ToListAsync();
+        if (items.Count == 0)
+        {
+            await FollowupAsync(embed: Embeds.Error($"No items tracked.\nTrack an item with {await GetCommand("items", ["track"])}"));
+            return;
+        }
+
+        var count = await db.TrackedItems.CountAsync(i => i.SellerId == Context.User.Id);
+        var (embed, components) = BuildItemList(Context.User.Id, items, page, Math.Ceiling((decimal)count / 25));
+
+        await ModifyOriginalResponseAsync(m =>
+        {
+            m.Embed = embed;
+            m.Components = components;
+        });
+    }
+
     public class TrackItemAutocompleteHandler(DatabaseContext db) : AutocompleteHandler
     {
         public override async Task<AutocompletionResult> GenerateSuggestionsAsync(IInteractionContext context, IAutocompleteInteraction autocompleteInteraction,
@@ -109,11 +177,12 @@ public class ItemModule(DatabaseContext db) : BaseModule(db)
         public override async Task<AutocompletionResult> GenerateSuggestionsAsync(IInteractionContext context, IAutocompleteInteraction autocompleteInteraction,
             IParameterInfo parameter, IServiceProvider services)
         {
-            var items = await db.TrackedItems.Include(i => i.Item).Include(i => i.World).Where(i =>
+            var items = await db.TrackedItems.Include(i => i.Item).Include(i => i.World).Include(i => i.Datacenter).Where(i =>
                     i.Item.Name.ToLower().Contains(((string)autocompleteInteraction.Data.Current.Value).ToLower()) && i.SellerId == context.User.Id)
                 .OrderBy(k => k.Item.Name).Take(25)
                 .ToListAsync();
-            IEnumerable<AutocompleteResult> results = items.Select(i => new AutocompleteResult($"{i.Item.Name}{(i.World != null ? $" - {i.World!.Name}" : "")}", i.Id.ToString()));
+            IEnumerable<AutocompleteResult> results = items.Select(i =>
+                new AutocompleteResult($"[{(i.World != null ? i.World!.Name : i.Datacenter!.Name)}] {i.Item.Name}", i.Id.ToString()));
             return AutocompletionResult.FromSuccess(results.Take(25));
         }
     }
