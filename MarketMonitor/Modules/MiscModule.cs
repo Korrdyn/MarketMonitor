@@ -16,6 +16,7 @@ public class MiscModule() : InteractionModuleBase<SocketInteractionContext>
         var self = Context.Client.GetUser(160168328520794112);
         var embed = new EmbedBuilder()
             .WithAuthor(Context.Client.CurrentUser.Username, Context.Client.CurrentUser.GetAvatarUrl())
+            .AddField("Version", Assembly.GetExecutingAssembly().GetName().Version, true)
             .AddField("Library", $"Discord.Net {library.Version!.ToString()}", true)
             .AddField("Developer", $"{DiscordClientHost.DisplayName(self)}", true)
             .AddField("Links",

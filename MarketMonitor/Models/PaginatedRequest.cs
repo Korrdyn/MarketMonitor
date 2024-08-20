@@ -2,22 +2,23 @@
 
 public class PaginatedRequest
 {
-    public Pagination Pagination { get; set; }
-    public List<ItemResult> Results { get; set; }
-}
-
-public class Pagination
-{
-    public int Page { get; set; }
-    public int? PageNext { get; set; }
-    public int? PagePrev { get; set; }
-    public int PageTotal { get; set; }
-    public int ResultsTotal { get; set; }
+    public string schema { get; set; }
+    public List<ItemResult> rows { get; set; }
 }
 
 public class ItemResult
 {
-    public int ID { get; set; }
-    public string Icon { get; set; }
+    public int row_id { get; set; }
+    public ItemFields fields { get; set; }
+}
+
+public class ItemFields
+{
     public string Name { get; set; }
+    public ItemIcon Icon { get; set; }
+}
+
+public class ItemIcon
+{
+    public string path_hr1 { get; set; }
 }

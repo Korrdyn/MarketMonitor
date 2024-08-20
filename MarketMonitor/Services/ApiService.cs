@@ -18,21 +18,30 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
         var existingItems = await db.GameItems.ToListAsync();
 
         Log.Information("[XIVAPI] Downloading items");
-        var initial = await "https://xivapi.com/item?limit=3000".GetJsonAsync<PaginatedRequest>();
+        var initial = await "https://beta.xivapi.com/api/1/sheet/Item?limit=500".GetJsonAsync<PaginatedRequest>();
         var rawItems = new List<ItemResult>();
 
-        rawItems.AddRange(initial.Results);
+        rawItems.AddRange(initial.rows);
 
-        for (int i = initial.Pagination.PageNext!.Value; i <= initial.Pagination.PageTotal; i++)
+        while (true)
         {
-            Log.Information($"[XIVAPI] Downloading items - page {i:N0}/{initial.Pagination.PageTotal:N0} - loaded {rawItems.Count:N0}/{initial.Pagination.ResultsTotal:N0}");
-            var request = await $"https://xivapi.com/item?limit=3000&page={i}".GetJsonAsync<PaginatedRequest>();
-            rawItems.AddRange(request.Results);
+            var lastItem = rawItems.OrderByDescending(i => i.row_id).First().row_id;
+            Log.Information(
+                $"[XIVAPI] Downloading items - Last item ID {lastItem} - Total so far {rawItems.Count:N0}");
+
+            var request =
+                await
+                    $"https://beta.xivapi.com/api/1/sheet/Item?after={lastItem}&limit=500"
+                        .GetJsonAsync<PaginatedRequest>();
+            if (request.rows.Count == 0) break;
+            rawItems.AddRange(request.rows);
+            await Task.Delay(500);
         }
 
         Log.Information($"[XIVAPI] Downloaded {rawItems.Count:N0} items");
 
-        var marketableItems = await "https://universalis.app/api/v2/marketable".WithHeader("User-Agent", "MarketMonitor").GetJsonAsync<int[]>();
+        var marketableItems = await "https://universalis.app/api/v2/marketable"
+            .WithHeader("User-Agent", "MarketMonitor").GetJsonAsync<int[]>();
 
         Log.Information($"[Universalis] Downloaded {marketableItems.Length:N0} marketable items");
 
@@ -41,12 +50,12 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
 
         foreach (var item in rawItems)
         {
-            var exists = existingItems.FirstOrDefault(i => i.Id == item.ID);
+            var exists = existingItems.FirstOrDefault(i => i.Id == item.row_id);
             if (exists != null)
             {
-                exists.Name = item.Name;
-                exists.Icon = item.Icon;
-                exists.Marketable = marketableItems.Contains(item.ID);
+                exists.Name = item.fields.Name;
+                exists.Icon = item.fields.Icon.path_hr1;
+                exists.Marketable = marketableItems.Contains(item.row_id);
                 db.Update(exists);
                 updated++;
             }
@@ -54,10 +63,10 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
             {
                 await db.AddAsync(new GameItemEntity
                 {
-                    Id = item.ID,
-                    Name = item.Name,
-                    Icon = item.Icon,
-                    Marketable = marketableItems.Contains(item.ID)
+                    Id = item.row_id,
+                    Name = item.fields.Name,
+                    Icon = item.fields.Icon.path_hr1,
+                    Marketable = marketableItems.Contains(item.row_id)
                 });
                 created++;
             }
@@ -71,7 +80,8 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
 
     public async Task UpdateWorlds()
     {
-        var worlds = await "https://universalis.app/api/v2/worlds".WithHeader("User-Agent", "MarketMonitor").GetJsonAsync<List<WorldsRequest>>();
+        var worlds = await "https://universalis.app/api/v2/worlds".WithHeader("User-Agent", "MarketMonitor")
+            .GetJsonAsync<List<WorldsRequest>>();
         var existing = await db.Worlds.ToListAsync();
         foreach (var world in worlds)
         {
@@ -85,8 +95,7 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
             {
                 await db.AddAsync(new WorldEntity
                 {
-                    Id = world.id,
-                    Name = world.name
+                    Id = world.id, Name = world.name
                 });
             }
         }
@@ -97,7 +106,8 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
 
     public async Task UpdateDC()
     {
-        var dcs = await "https://universalis.app/api/v2/data-centers".WithHeader("User-Agent", "MarketMonitor").GetJsonAsync<List<DCRequest>>();
+        var dcs = await "https://universalis.app/api/v2/data-centers".WithHeader("User-Agent", "MarketMonitor")
+            .GetJsonAsync<List<DCRequest>>();
         var existing = await db.Datacenters.ToListAsync();
         foreach (var dc in dcs)
         {
@@ -118,11 +128,20 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
 
     public async Task CheckItems()
     {
-        var trackedItems = await db.TrackedItems.Include(i => i.Seller).ThenInclude(s => s.Retainers).Include(i => i.Item).Include(i => i.World).Include(i => i.Datacenter)
+        var trackedItems = await db.TrackedItems
+            .Include(i => i.Seller)
+            .ThenInclude(s => s.Retainers)
+            .Include(i => i.Item)
+            .Include(i => i.World)
+            .Include(i => i.Datacenter)
+            .Where(i => i.LastNotify == null || DateTime.UtcNow - i.LastNotify > i.Seller.NotifyFreq)
             .ToListAsync();
 
-        var groups = trackedItems.Where(i => i.LastNotify == null || DateTime.UtcNow - i.LastNotify > i.Seller.NotifyFreq)
-            .GroupBy(i => new { i.WorldId, i.DatacenterId }).ToList();
+        var groups = trackedItems
+            .GroupBy(i => new
+            {
+                i.WorldId, i.DatacenterId
+            }).ToList();
 
         Log.Information($"[Universalis] Checking {trackedItems.Count:N0} items ({groups.Count:N0} groups)");
 
@@ -135,9 +154,11 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
                 MultiItemPriceResult priceResponse;
                 if (ids.Length == 1)
                 {
-                    var item = await $"https://universalis.app/api/v2/{region}/{ids[0]}?fields=listings.pricePerUnit%2Clistings.retainerName%2ClastUploadTime"
-                        .WithHeader("User-Agent", "MarketMonitor")
-                        .GetJsonAsync<SingleItemPriceResult>();
+                    var item =
+                        await
+                            $"https://universalis.app/api/v2/{region}/{ids[0]}?fields=listings.pricePerUnit%2Clistings.retainerName%2ClastUploadTime"
+                                .WithHeader("User-Agent", "MarketMonitor")
+                                .GetJsonAsync<SingleItemPriceResult>();
                     var list = new SortedList<string, SingleItemPriceResult>();
                     list.Add(ids[0].ToString(), item);
                     priceResponse = new MultiItemPriceResult
@@ -147,7 +168,8 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
                 }
                 else
                 {
-                    priceResponse = await $"https://universalis.app/api/v2/{region}/{string.Join(',', ids)}".WithHeader("User-Agent", "MarketMonitor")
+                    priceResponse = await $"https://universalis.app/api/v2/{region}/{string.Join(',', ids)}"
+                        .WithHeader("User-Agent", "MarketMonitor")
                         .GetJsonAsync<MultiItemPriceResult>();
                 }
 
@@ -161,9 +183,12 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
                     foreach (var item in group.Where(i => i.ItemId == id))
                     {
                         var retainers = item.Seller.Retainers.Select(r => r.Name);
-                        var selfPrice = prices.listings.OrderBy(i => i.pricePerUnit).FirstOrDefault(i => retainers.Contains(i.retainerName));
+                        var selfPrice = prices.listings.OrderBy(i => i.pricePerUnit)
+                            .FirstOrDefault(i => retainers.Contains(i.retainerName));
                         if (selfPrice == null) continue;
-                        var nextPrice = prices.listings.Where(i => !retainers.Contains(i.retainerName) && i.hq == selfPrice.hq).MinBy(i => i.pricePerUnit);
+                        var nextPrice = prices.listings
+                            .Where(i => !retainers.Contains(i.retainerName) && i.hq == selfPrice.hq)
+                            .MinBy(i => i.pricePerUnit);
                         if (nextPrice == null || selfPrice.pricePerUnit <= nextPrice.pricePerUnit) continue;
 
                         var cutAmount = selfPrice.pricePerUnit - nextPrice.pricePerUnit;
@@ -172,14 +197,16 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
                         {
                             var user = await client.GetUserAsync(item.SellerId);
                             await user.SendMessageAsync(embed: new EmbedBuilder()
-                                .WithAuthor(item.World is null ? item.Datacenter!.Name : item.World.Name, "https://cdn.carbon.pics/cross-world-flower.png")
+                                .WithAuthor(item.World is null ? item.Datacenter!.Name : item.World.Name,
+                                    "https://cdn.carbon.pics/cross-world-flower.png")
                                 .WithFooter("You've been under cut!")
                                 .WithTitle(item.Item.Name)
                                 .WithDescription(
                                     $"[Universalis | Updated {new TimestampTag(DateTimeOffset.FromUnixTimeMilliseconds(prices.lastUploadTime), TimestampTagStyles.Relative)}](https://universalis.app/market/{item.ItemId})")
-                                .WithThumbnailUrl($"https://xivapi.com{item.Item.Icon}")
+                                .WithThumbnailUrl($"https://beta.xivapi.com/api/1/asset/{item.Item.Icon}?format=png")
                                 .AddField("Your Price", $"<:gil:1270605677651558433> {selfPrice.pricePerUnit:N0}", true)
-                                .AddField("Lowest Price", $"<:gil:1270605677651558433> {nextPrice.pricePerUnit:N0}", true)
+                                .AddField("Lowest Price", $"<:gil:1270605677651558433> {nextPrice.pricePerUnit:N0}",
+                                    true)
                                 .AddField("Amount Cut",
                                     $"<:gil:1267715732704198797> {cutAmount:N0} ({Math.Round((decimal)(selfPrice.pricePerUnit - nextPrice.pricePerUnit) / selfPrice.pricePerUnit * 100, 1):N1}%)",
                                     true)
@@ -190,10 +217,12 @@ public class ApiService(DatabaseContext db, DiscordSocketClient client)
                             await db.SaveChangesAsync();
                         }
                         catch (Exception)
-                        { }
+                        {
+                        }
 
 
-                        Log.Information($"{region} {item.ItemId} self {selfPrice?.pricePerUnit} ({selfPrice?.retainerName}) {nextPrice?.pricePerUnit} ({nextPrice?.retainerName})");
+                        Log.Information(
+                            $"{region} {item.ItemId} self {selfPrice?.pricePerUnit} ({selfPrice?.retainerName}) {nextPrice?.pricePerUnit} ({nextPrice?.retainerName})");
                     }
                 }
             }
